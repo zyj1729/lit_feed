@@ -29,7 +29,7 @@ from sentence_transformers import SentenceTransformer, util
 # ==========================
 
 # How many days back to look
-LOOKBACK_DAYS = 7
+LOOKBACK_DAYS = 30
 
 # Max items to consider per feed before filtering/ranking
 MAX_ITEMS_PER_FEED = 200
@@ -73,10 +73,6 @@ FEEDS = [
         "name": "Genome Research",
         "url": "https://genome.cshlp.org/rss/current.xml",
     },
-    # {
-    #     "name": "Genome Biology",
-    #     "url": "https://genomebiology.biomedcentral.com/articles/most-recent/rss",
-    # },
     {
         "name": "Nature Genetics",
         "url": "https://www.nature.com/ng.rss",
@@ -85,13 +81,32 @@ FEEDS = [
         "name": "Nature Methods",
         "url": "https://www.nature.com/nmeth.rss",
     },
-    # {
-    #     "name": "Cell Genomics",
-    #     "url": "https://www.cell.com/cell-genomics/rss",
-    # },
     {
         "name": "Nature Biotechnology",
         "url": "https://www.nature.com/nbt/current_issue/rss/",
+    },
+    {
+        "name": "Nature",
+        "url": "http://www.nature.com/nature/current_issue/rss",
+    },
+    
+    {
+        "name": "Science",
+        "url": "http://www.sciencemag.org/rss/current.xml",
+    },
+    
+    {
+        "name": "Cell",
+        "url": "https://www.cell.com/cell/current.rss",
+    },
+    
+    {
+        "name": "Bioinformatics",
+        "url": "https://academic.oup.com/rss/site_5139/3001.xml",
+    },
+    {
+        "name": "PLOS Computational Biology",
+        "url": "https://journals.plos.org/ploscompbiol/feed/atom",
     },
 ]
 
