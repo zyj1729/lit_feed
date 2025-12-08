@@ -12,6 +12,32 @@ cd lit_feed
 python lit_feed.py
 ```
 
+## Journals default
+_arXiv q-bio_
+
+_arXiv cs.LG_
+
+_bioRxiv Genomics+Bioinformatics_
+
+_Nature_
+
+_Cell_
+
+_Science_
+
+_Nature Methods_
+
+_Nature Genetics_
+
+_Nature Biotechnology_
+
+_Genome Research_
+
+_Oxford Bioinformatics_
+
+_PLOS Computational Biology_
+
 ## Customization
 
 You can customize the journals to include in **Feeds** section, keywords to include or exclude in **Keywords filters** section, seed paper of relevance in **Canonical papers** section. 
+
