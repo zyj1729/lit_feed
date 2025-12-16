@@ -231,6 +231,76 @@ def passes_keyword_filters(paper: Paper) -> bool:
     return True
 
 
+import json
+import glob
+import re
+from html import escape
+from urllib.parse import urlsplit, urlunsplit
+
+def canonicalize_url(url: str) -> str:
+    """Normalize URLs so trivial differences don't create new IDs."""
+    if not url:
+        return ""
+    try:
+        u = urlsplit(url.strip())
+        # drop fragment, normalize scheme+netloc+path; keep query (sometimes DOI/IDs live there)
+        return urlunsplit((u.scheme.lower() or "https", u.netloc.lower(), u.path.rstrip("/"), u.query, ""))
+    except Exception:
+        return url.strip()
+
+def paper_key(p: Paper) -> str:
+    """
+    Stable identity for dedup / 'seen before' comparison.
+    Prefer canonicalized link; fallback to (source|title|date).
+    """
+    link = canonicalize_url(p.link)
+    if link:
+        return link
+    date_str = p.published.astimezone(timezone.utc).strftime("%Y-%m-%d")
+    return f"{p.source}|{p.title.strip().lower()}|{date_str}"
+
+def digest_date_from_path(path: str) -> str | None:
+    # expects digest_YYYY-MM-DD.html
+    base = os.path.basename(path)
+    m = re.match(r"digest_(\d{4}-\d{2}-\d{2})\.html$", base)
+    return m.group(1) if m else None
+
+def most_recent_non_today_digest_path(output_dir: str) -> str | None:
+    today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    paths = sorted(glob.glob(os.path.join(output_dir, "digest_*.html")))
+    # walk backward until we find a non-today one
+    for p in reversed(paths):
+        if digest_date_from_path(p) and digest_date_from_path(p) != today:
+            return p
+    return None
+
+_KEYS_BLOB_RE = re.compile(r"<!--\s*DIGEST_KEYS_JSON\s*(\{.*?\})\s*-->", re.DOTALL)
+
+def load_keys_from_html(path: str) -> set[str]:
+    """Read prior digest HTML and recover the set of paper keys stored in it."""
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            html = f.read()
+        m = _KEYS_BLOB_RE.search(html)
+        if not m:
+            return set()
+        payload = json.loads(m.group(1))
+        keys = payload.get("keys", [])
+        return set(keys) if isinstance(keys, list) else set()
+    except Exception:
+        return set()
+
+def split_new_vs_previous(papers_ranked: List[Paper], seen_keys: set[str]) -> tuple[List[Paper], List[Paper]]:
+    new_items, prev_items = [], []
+    for p in papers_ranked:
+        k = paper_key(p)
+        if k in seen_keys:
+            prev_items.append(p)
+        else:
+            new_items.append(p)
+    return new_items, prev_items
+
+
 def fetch_feed(feed: Dict[str, str]) -> List[Paper]:
     print(f"Fetching feed: {feed['name']}  ({feed['url']})")
     parsed = feedparser.parse(feed["url"])
@@ -339,11 +409,20 @@ def save_markdown(md: str) -> str:
     print(f"Saved digest to {path}")
     return path
 
-def build_html_digest(papers: List[Paper]) -> str:
-    """Return a full HTML document string for the digest."""
+def build_html_digest(new_papers: List[Paper], prev_papers: List[Paper]) -> str:
+    """Return a full HTML document string with two sections:
+    - Today's Feed: new since last digest
+    - Previous Feed: already seen in last digest
+
+    Also embeds a machine-readable JSON blob of paper keys as an HTML comment
+    so future runs can detect duplicates.
+    """
+    import json
+    from html import escape
+
     now = datetime.now(timezone.utc)
 
-    # simple inline CSS so the file is standalone
+    # standalone inline CSS
     css = """
     body {
         font-family: -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
@@ -358,21 +437,27 @@ def build_html_digest(papers: List[Paper]) -> str:
         font-size: 1.8rem;
         margin-bottom: 0.25rem;
     }
+    h2 {
+        font-size: 1.25rem;
+        margin-top: 1.75rem;
+        margin-bottom: 0.75rem;
+    }
     .meta {
         color: #6b7280;
         font-size: 0.9rem;
-        margin-bottom: 1.5rem;
+        margin-bottom: 1.25rem;
     }
     .paper {
         background: #ffffff;
-        margin: 1rem 0 1.5rem;
+        margin: 0.75rem 0 1.0rem;
         padding: 1rem 1.25rem;
         border-radius: 0.5rem;
         box-shadow: 0 1px 3px rgba(15,23,42,0.08);
     }
-    .paper h2 {
-        font-size: 1.1rem;
+    .paper h3 {
+        font-size: 1.05rem;
         margin: 0 0 0.25rem;
+        font-weight: 650;
     }
     .paper a {
         color: #2563eb;
@@ -391,9 +476,14 @@ def build_html_digest(papers: List[Paper]) -> str:
         white-space: pre-wrap;
     }
     .index {
-        font-weight: 600;
+        font-weight: 700;
         color: #4b5563;
         margin-bottom: 0.25rem;
+    }
+    .section-note {
+        color: #6b7280;
+        font-size: 0.9rem;
+        margin-bottom: 0.75rem;
     }
     """
 
@@ -402,58 +492,85 @@ def build_html_digest(papers: List[Paper]) -> str:
     <div class="meta">
         Generated on {now:%Y-%m-%d %H:%M UTC}<br>
         Time window: last {LOOKBACK_DAYS} days<br>
-        Feeds: {", ".join(f["name"] for f in FEEDS)}
+        Feeds: {escape(", ".join(f["name"] for f in FEEDS))}
     </div>
     """
 
-    paper_blocks = []
-    for i, p in enumerate(papers, start=1):
-        date_str = p.published.astimezone(timezone.utc).strftime("%Y-%m-%d")
-        score_str = f"{p.score:.3f}" if not math.isnan(p.score) else "n/a"
-        summary = p.summary or "No abstract/summary available."
-        # Optionally truncate extremely long summaries:
-        summary = textwrap.shorten(summary, width=1200, placeholder="…")
+    def render_section(title: str, note: str, papers: List[Paper], start_index: int) -> str:
+        if not papers:
+            return f"""
+            <h2>{escape(title)}</h2>
+            <div class="section-note">{escape(note)}</div>
+            <div class="meta">No items.</div>
+            """
 
-        block = f"""
-        <div class="paper">
-          <div class="index">#{i}</div>
-          <h2><a href="{p.link}" target="_blank" rel="noopener noreferrer">
-              {p.title}
-          </a></h2>
-          <div class="info">
-            Source: <strong>{p.source}</strong> ·
-            Date: {date_str} ·
-            Relevance score: {score_str}
-          </div>
-          <div class="summary">{summary}</div>
-        </div>
-        """
-        paper_blocks.append(block)
+        blocks = [f"<h2>{escape(title)}</h2>"]
+        blocks.append(f"<div class='section-note'>{escape(note)}</div>")
 
-    body = header + "\n".join(paper_blocks)
+        for i, p in enumerate(papers, start=start_index):
+            date_str = p.published.astimezone(timezone.utc).strftime("%Y-%m-%d")
+            score_str = f"{p.score:.3f}" if not math.isnan(p.score) else "n/a"
+            summary = p.summary or "No abstract/summary available."
+            summary = textwrap.shorten(summary, width=1200, placeholder="…")
+
+            blocks.append(f"""
+            <div class="paper">
+              <div class="index">#{i}</div>
+              <h3><a href="{escape(p.link)}" target="_blank" rel="noopener noreferrer">
+                  {escape(p.title)}
+              </a></h3>
+              <div class="info">
+                Source: <strong>{escape(p.source)}</strong> ·
+                Date: {escape(date_str)} ·
+                Relevance score: {escape(score_str)}
+              </div>
+              <div class="summary">{escape(summary)}</div>
+            </div>
+            """)
+
+        return "\n".join(blocks)
+
+    # Build the two sections
+    todays_html = render_section(
+        title="Today's Feed",
+        note="New since the most recent digest in the output directory.",
+        papers=new_papers,
+        start_index=1,
+    )
+    prev_html = render_section(
+        title="Previous Feed",
+        note="Items that also appeared in the most recent digest (overlap due to RSS windows / TOCs).",
+        papers=prev_papers,
+        start_index=len(new_papers) + 1,
+    )
+
+    # Embed keys so next run can read them back
+    all_keys = [paper_key(p) for p in (new_papers + prev_papers)]
+    keys_blob = f"<!-- DIGEST_KEYS_JSON {json.dumps({'keys': all_keys})} -->"
+
+    body = header + todays_html + prev_html + keys_blob
 
     html = f"""<!DOCTYPE html>
-    <html lang="en">
-    <head>
-      <meta charset="utf-8">
-      <title>Literature Digest</title>
-      <meta name="viewport" content="width=device-width, initial-scale=1">
-      <style>{css}</style>
-    </head>
-    <body>
-    {body}
-    </body>
-    </html>
-    """
-
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Literature Digest</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <style>{css}</style>
+</head>
+<body>
+{body}
+</body>
+</html>
+"""
     return html
 
-
-def save_html(html: str) -> str:
+def save_html(html: str, path: str | None = None) -> str:
     os.makedirs(OUTPUT_DIR, exist_ok=True)
-    now = datetime.now(timezone.utc)
-    fname = f"digest_{now:%Y-%m-%d}.html"
-    path = os.path.join(OUTPUT_DIR, fname)
+    if path is None:
+        now = datetime.now(timezone.utc)
+        fname = f"digest_{now:%Y-%m-%d}.html"
+        path = os.path.join(OUTPUT_DIR, fname)
     with open(path, "w", encoding="utf-8") as f:
         f.write(html)
     print(f"Saved HTML digest to {path}")
@@ -502,17 +619,36 @@ def main():
         except Exception as e:
             print(f"Error fetching {feed['name']}: {e}")
 
+    dedup = {}
+    for p in all_papers:
+        dedup.setdefault(paper_key(p), p)
+    all_papers = list(dedup.values())
+    
     if not all_papers:
         print("No papers found after filtering.")
         return
 
     ranked = rank_papers(all_papers)
-    top = ranked[:TOP_K]
-
-    html = build_html_digest(top)
-    save_html(html)
-    post_to_slack(top)  # Slack still uses the text summary we build there
-
+    ranked = ranked[:TOP_K]
+    
+    # Load keys from most recent prior digest (if any)
+    os.makedirs(OUTPUT_DIR, exist_ok=True)
+    today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    
+    # Path we will write to (overwrite if exists)
+    today_path = os.path.join(OUTPUT_DIR, f"digest_{today}.html")
+    
+    # For splitting: ONLY compare against the most recent NON-today digest
+    prev_non_today = most_recent_non_today_digest_path(OUTPUT_DIR)
+    seen_keys = load_keys_from_html(prev_non_today) if prev_non_today else set()
+    
+    new_items, prev_items = split_new_vs_previous(ranked, seen_keys)
+    
+    html = build_html_digest(new_items, prev_items)
+    save_html(html, path=today_path)
+    
+    # For Slack: usually you want only the NEW items; change if you want both.
+    post_to_slack(new_items if new_items else ranked)
 
 if __name__ == "__main__":
     main()
