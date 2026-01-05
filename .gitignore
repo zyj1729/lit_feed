@@ -1,3 +1,4 @@
 # Generated literature digests (HTML/MD outputs)
 digests/
 .ipynb_checkpoints/
+rebuild_digest_once.py
