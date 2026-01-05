@@ -2,3 +2,4 @@
 digests/
 .ipynb_checkpoints/
 rebuild_digest_once.py
+__pycache__
