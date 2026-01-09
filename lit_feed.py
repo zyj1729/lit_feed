@@ -470,7 +470,7 @@ def save_markdown(md: str) -> str:
     print(f"Saved digest to {path}")
     return path
 
-def build_html_digest(new_papers: List[Paper], prev_papers: List[Paper]) -> str:
+def build_html_digest(new_papers: List[Paper], prev_papers: List[Paper], history_papers: List[Paper]) -> str:
     """Return a full HTML document string with two sections:
     - Today's Feed: new since last digest
     - Previous Feed: already seen in last digest
@@ -616,9 +616,8 @@ def build_html_digest(new_papers: List[Paper], prev_papers: List[Paper]) -> str:
             "score": p.score,
         }
     
-    payload = {
-        "papers": [_paper_to_dict(p) for p in (new_papers + prev_papers)]
-    }
+    payload = {"papers": [_paper_to_dict(p) for p in history_papers]}
+
     keys_blob = f"<!-- DIGEST_KEYS_JSON {json.dumps(payload)} -->"
 
     body = header + todays_html + prev_html + keys_blob
@@ -707,6 +706,7 @@ def main():
     # Load keys from most recent prior digest (if any)
     os.makedirs(OUTPUT_DIR, exist_ok=True)
     today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    today_date = datetime.now(timezone.utc).date()
     
     # Path we will write to (overwrite if exists)
     today_path = os.path.join(OUTPUT_DIR, f"digest_{today}.html")
@@ -714,12 +714,12 @@ def main():
     # Use the most recent NON-today digest as the accumulated history baseline
     prev_path = most_recent_non_today_digest_path(OUTPUT_DIR)
     prev_papers = load_papers_from_html(prev_path) if prev_path else []
-    seen_keys = {paper_key(p) for p in prev_papers}
     cutoff = datetime.now(timezone.utc) - timedelta(days=LOOKBACK_DAYS)
     prev_papers = [p for p in prev_papers if p.published >= cutoff]
-    
-    # Track what is actually fetched today (so "Today's Feed" means "new today")
-    current_keys = {paper_key(p) for p in all_papers}
+    seen_keys = {paper_key(p) for p in prev_papers}
+
+    # Define "Today's feed" strictly by published date (UTC)
+    today_keys = {paper_key(p) for p in all_papers if p.published.date() == today_date}
     
     # Merge today's RSS papers with accumulated previous papers, then dedup by key
     merged = {}
@@ -732,13 +732,20 @@ def main():
     
     # Split AFTER ranking, but keep accumulated previous even if not in today's RSS
     new_items, prev_items = [], []
+    has_history = bool(prev_papers)  # i.e., we found a prior digest
+    
     for p in ranked:
         k = paper_key(p)
-        if (k in current_keys) and (k not in seen_keys):
-            new_items.append(p)
-        elif k in seen_keys:
-            prev_items.append(p)
     
+        # 1) Today's Feed: published today AND not seen before
+        if (k in today_keys) and (k not in seen_keys):
+            new_items.append(p)
+            continue
+    
+        # 2) Previous Feed: anything already seen, OR (on first run) anything not from today
+        if (k in seen_keys) or (not has_history and p.published.date() != today_date):
+            prev_items.append(p)
+
     # Apply relevance threshold to Today's feed
     new_items = [p for p in new_items if (not math.isnan(p.score)) and (p.score >= TODAY_MIN_SCORE)]
     
@@ -746,7 +753,14 @@ def main():
     new_items = new_items[:TODAY_TOP_K]
     prev_items = prev_items[:PREV_TOP_K]
     
-    html = build_html_digest(new_items, prev_items)
+    # "history_papers" should be everything you want to remember:
+    # previous history + anything you've ever shown today (today + previous candidates)
+    history_dedup = {}
+    for p in (prev_papers + all_papers):
+        history_dedup[paper_key(p)] = p
+    history_papers = list(history_dedup.values())
+    
+    html = build_html_digest(new_items, prev_items, history_papers)
     
     # overwrite today's file (your existing overwrite logic)
     today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
