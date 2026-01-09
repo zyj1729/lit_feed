@@ -717,9 +717,15 @@ def main():
     cutoff = datetime.now(timezone.utc) - timedelta(days=LOOKBACK_DAYS)
     prev_papers = [p for p in prev_papers if p.published >= cutoff]
     seen_keys = {paper_key(p) for p in prev_papers}
-
+    
+    yesterday_date = today_date - timedelta(days=1)
+    desired_dates = {today_date, yesterday_date}
     # Define "Today's feed" strictly by published date (UTC)
-    today_keys = {paper_key(p) for p in all_papers if p.published.date() == today_date}
+    today_keys = {
+        paper_key(p)
+        for p in all_papers
+        if p.published.date() in desired_dates
+    }
     
     # Merge today's RSS papers with accumulated previous papers, then dedup by key
     merged = {}
