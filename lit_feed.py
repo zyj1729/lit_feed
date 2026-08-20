@@ -63,12 +63,23 @@ CROSSREF_RETRIES = 4
 # what buys the room to lower this -- see CANONICAL_PAPERS.
 #
 # Set to 0 to disable the semantic route and go back to keywords alone.
-# 0.47 rather than 0.50: scoring against group centroids instead of individual seeds
-# shifts every score down about 0.018 (averaging moves a centroid away from its own
-# members), so the same selectivity sits slightly lower on the scale. Grouping also
-# sharpens the distribution -- more papers clear 0.50, fewer clear 0.30 -- which is
-# the denoising doing its job.
-SEMANTIC_ADMIT_SCORE = 0.47
+# Measured against a real day's pool of 1115 papers rather than guessed. Expanding the
+# seed list from 5 short entries to 22 real abstracts did NOT widen the gap between
+# on-topic and off-topic papers -- it narrowed it, from +0.173 to +0.155. Richer seeds
+# lifted the off-topic median (+0.023) more than the on-topic one (+0.006), because the
+# method-and-tooling vocabulary the new seeds carry also describes generic
+# bioinformatics papers, which is most of what Bioinformatics and PLOS Comp Biol
+# publish. The seeds did sharpen the top end -- a spatial multiomic integration paper
+# went 0.474 -> 0.634 -- so the fix is a higher bar, not a lower one.
+#
+# What each bar admits per day, non-keyword papers only:
+#   0.40 -> 65    0.45 -> 35    0.47 -> 24    0.50 -> 16    0.55 -> 5    0.60 -> 1
+# By eye, quality falls off below about 0.55: at 0.50 the list picks up survival
+# prediction, tsRNA-disease association and barcode mappers. 0.55 keeps roughly five a
+# day and the genuinely on-topic ones sit comfortably above it.
+#
+# Set to 0 to disable the semantic route and use keywords alone.
+SEMANTIC_ADMIT_SCORE = 0.55
 
 # Abstract length in the emailed copy. Cards end up within a line of each other at
 # this width, which is what keeps the message scannable; the archive copy keeps the
@@ -269,34 +280,251 @@ TAGS = [
 # without generic machine-learning papers coming along with it.
 
 CANONICAL_PAPERS = [
+    # ---- cardiovascular single-cell --------------------------------
     {
         "group": "cardiovascular single-cell",
-        "title": "Single-cell multi-omics and perturbation profiling of human cardiomyocytes",
-        "summary": "Integration of scRNA-seq, chromatin accessibility, and proteomics "
-                   "to understand cardiomyopathy genetics and perturbation responses."
+        "title": "Cells of the adult human heart",
+        "summary": "Large-scale single-cell and single-nucleus transcriptomes of six "
+                   "anatomical adult human heart regions define a human cardiac cell atlas. "
+                   "The data reveal heterogeneity of cardiomyocytes, pericytes and "
+                   "fibroblasts, distinct atrial and ventricular cell subsets, the "
+                   "complexity of the cardiac vasculature along the arterio-venous axis, and "
+                   "cardiac-resident macrophages with inflammatory and protective "
+                   "signatures.",
+        # 10.1038/s41586-020-2797-4
+    },
+    {
+        "group": "cardiovascular single-cell",
+        "title": "Single-nucleus profiling of human dilated and hypertrophic cardiomyopathy",
+        "summary": "Single-nucleus RNA sequencing of nearly 600,000 nuclei from left "
+                   "ventricle samples of 11 dilated cardiomyopathy, 15 hypertrophic "
+                   "cardiomyopathy and 16 non-failing hearts maps molecular alterations at "
+                   "single-cell resolution. Dilated and hypertrophic cardiomyopathy profiles "
+                   "converge at tissue and cell-type level, and a subset of cardiomyopathy "
+                   "hearts harbours a unique activated fibroblast population probed by "
+                   "CRISPR knockout screening.",
+        # 10.1038/s41586-022-04817-8
+    },
+    {
+        "group": "cardiovascular single-cell",
+        "title": "Spatial multi-omic map of human myocardial infarction",
+        "summary": "An integrative high-resolution map of human cardiac remodelling after "
+                   "myocardial infarction built from single-cell gene expression, chromatin "
+                   "accessibility and spatial transcriptomic profiling of multiple "
+                   "physiological zones and time points. Multi-modal data integration "
+                   "resolves cardiac cell-type composition and identifies disease-specific "
+                   "cell states and distinct tissue structures of injury, repair and "
+                   "remodelling in their spatial context.",
+        # 10.1038/s41586-022-05060-x
+    },
+    {
+        "group": "cardiovascular single-cell",
+        "title": "An integrative single-nucleus multiomic atlas of the human left ventricle identifies gene regulatory network dynamics across cardiac development, aging, and disease",
+        "summary": "An integrated multiomic atlas of human cardiac cells combining "
+                   "single-nucleus RNA-seq from 299 donors and single-nucleus ATAC-seq from "
+                   "106 donors. Developmental and disease-driven remodelling converge at "
+                   "transcriptomic and epigenomic levels, revealing reactivation of fetal "
+                   "gene programs and cell-type-specific transcription factors. A "
+                   "cell-type-resolved enhancer-to-gene linkage map refines dilated and "
+                   "hypertrophic cardiomyopathy risk loci.",
+        # 10.1186/s13059-026-04061-7
+    },
+    # ---- single-cell foundation models -----------------------------
+    {
+        "group": "single-cell foundation models",
+        "title": "Large-scale foundation model on single-cell transcriptomics",
+        "summary": "A pretrained foundation model on single-cell transcriptomics with 100 "
+                   "million parameters covering about 20,000 genes, pretrained on over 50 "
+                   "million human single-cell transcriptomic profiles. Its asymmetric "
+                   "transformer-like architecture captures context relations among genes "
+                   "across cell types and states, reaching state-of-the-art performance on "
+                   "gene expression enhancement, drug response prediction, perturbation "
+                   "prediction and cell type annotation.",
+        # 10.1038/s41592-024-02305-7
     },
     {
         "group": "single-cell foundation models",
-        "title": "Foundation models for single-cell gene expression and perturbation prediction",
-        "summary": "Large-scale pretraining on single-cell transcriptomes and use of "
-                   "in silico perturbations to predict gene regulatory responses."
+        "title": "Zero-shot evaluation reveals limitations of single-cell foundation models",
+        "summary": "Foundation models such as scGPT and Geneformer have not been rigorously "
+                   "evaluated in the zero-shot setting, where they are used without any "
+                   "further training. Zero-shot performance is critical to applications that "
+                   "exclude fine-tuning, such as discovery settings where labels are "
+                   "unknown. Evaluation of Geneformer and scGPT suggests these models may "
+                   "face reliability challenges and can be outperformed by simpler methods.",
+        # 10.1186/s13059-025-03574-x
+    },
+    {
+        "group": "single-cell foundation models",
+        "title": "Universal cell embedding provides a foundation model for cell biology",
+        "summary": "The universal cell embedding (UCE) foundation model is trained on a "
+                   "large corpus of cell data by self-supervision, creating a unified "
+                   "biological latent space that represents cells across diverse tissues and "
+                   "species. New cells are embedded with no data labelling, model training "
+                   "or fine-tuning. UCE was used to build the Integrated Mega-scale Atlas of "
+                   "36 million cells and more than 1,000 cell types across eight species.",
+        # 10.1038/s41586-026-10689-z
     },
     {
         "group": "single-cell foundation models",
         "title": "Transfer learning enables predictions in network biology.",
         "summary": "Context-aware, attention-based model Geneformer pretrained on ~30M "
-                   "single-cell transcriptomes to learn gene network dynamics."
+                   "single-cell transcriptomes to learn gene network dynamics.",
     },
     {
         "group": "single-cell foundation models",
         "title": "scGPT: towards building a foundation model for single-cell multi-omics",
-        "summary": "using a generative pretrained transformer trained on over 30M cells."
+        "summary": "A generative pretrained transformer trained on over 30M cells for "
+                   "single-cell multi-omic analysis.",
     },
     {
         "group": "single-cell foundation models",
         "title": "Tahoe-x1: scaling perturbation-trained single-cell foundation models",
         "summary": "Tx1 is pretrained on 200M+ perturbation-rich scRNA profiles and "
-                   "fine-tuned for cancer-relevant prediction tasks."
+                   "fine-tuned for cancer-relevant prediction tasks.",
+    },
+    # ---- perturbation prediction -----------------------------------
+    {
+        "group": "perturbation prediction",
+        "title": "Mapping information-rich genotype-phenotype landscapes with genome-scale Perturb-seq",
+        "summary": "Genome-scale Perturb-seq combines CRISPR interference (CRISPRi) with "
+                   "single-cell RNA-sequencing readouts across more than 2.5 million human "
+                   "cells, targeting all expressed genes. Transcriptional phenotypes predict "
+                   "the function of poorly characterized genes and allow in-depth dissection "
+                   "of complex cellular phenomena, from RNA processing to differentiation, "
+                   "yielding an information-rich genotype-phenotype map.",
+        # 10.1016/j.cell.2022.05.013
+    },
+    {
+        "group": "perturbation prediction",
+        "title": "Predicting transcriptional outcomes of novel multigene perturbations with GEARS",
+        "summary": "GEARS (graph-enhanced gene activation and repression simulator) "
+                   "integrates deep learning with a knowledge graph of gene-gene "
+                   "relationships to predict transcriptional responses to single and "
+                   "multigene perturbations from single-cell RNA-sequencing perturbational "
+                   "screens. It predicts outcomes of perturbing gene combinations that were "
+                   "never experimentally perturbed and distinguishes genetic interaction "
+                   "subtypes in combinatorial screens.",
+        # 10.1038/s41587-023-01905-6
+    },
+    {
+        "group": "perturbation prediction",
+        "title": "Predicting cellular responses to complex perturbations in high-throughput screens",
+        "summary": "The compositional perturbation autoencoder (CPA) combines the "
+                   "interpretability of linear models with the flexibility of deep learning "
+                   "for single-cell response modeling. CPA learns to in silico predict "
+                   "transcriptional perturbation response at the single-cell level for "
+                   "unseen dosages, cell types, time points and species, predicts unseen "
+                   "drug combinations, and imputes missing combinations in a Perturb-seq "
+                   "genetic screen.",
+        # 10.15252/msb.202211517
+    },
+    # ---- multi-omics integration -----------------------------------
+    {
+        "group": "multi-omics integration",
+        "title": "Integrated analysis of multimodal single-cell data",
+        "summary": "Simultaneous measurement of multiple modalities in single cells requires "
+                   "methods that define cellular states from multimodal data. "
+                   "Weighted-nearest neighbor analysis is an unsupervised framework that "
+                   "learns the relative utility of each data type in each cell, enabling "
+                   "integrative analysis of multiple modalities. Applied to a CITE-seq "
+                   "dataset of 211,000 human PBMCs, it builds a multimodal reference atlas "
+                   "of the circulating immune system.",
+        # 10.1016/j.cell.2021.04.048
+    },
+    {
+        "group": "multi-omics integration",
+        "title": "Multi-omics single-cell data integration and regulatory inference with graph-linked embedding",
+        "summary": "Most single-cell datasets include only one omics modality, and different "
+                   "omics layers typically have distinct feature spaces. GLUE (graph-linked "
+                   "unified embedding) bridges this gap by explicitly modeling regulatory "
+                   "interactions across omics layers. Benchmarking on heterogeneous "
+                   "single-cell multi-omics data covers triple-omics integration, "
+                   "integrative regulatory inference and multi-omics human cell atlas "
+                   "construction.",
+        # 10.1038/s41587-022-01284-4
+    },
+    {
+        "group": "multi-omics integration",
+        "title": "MultiVI: deep generative model for the integration of multimodal data",
+        "summary": "Jointly profiling the transcriptome, chromatin accessibility and other "
+                   "molecular properties of single cells offers a powerful way to study "
+                   "cellular diversity. MultiVI is a probabilistic deep generative model for "
+                   "such multiomic data that creates a joint representation of all input "
+                   "modalities and leverages it to enhance single-modality datasets, even "
+                   "for cells in which one or more modalities are missing.",
+        # 10.1038/s41592-023-01909-9
+    },
+    {
+        "group": "multi-omics integration",
+        "title": "Integration of spatial and single-cell data across modalities with weakly linked features",
+        "summary": "No technology captures all modalities within the same cell, and "
+                   "cross-modal integration usually depends on highly correlated, a priori "
+                   "linked features. MaxFuse (matching X-modality via fuzzy smoothed "
+                   "embedding) uses iterative coembedding, data smoothing and cell matching "
+                   "to integrate weakly linked modalities, enabling spatial consolidation of "
+                   "proteomic, transcriptomic and epigenomic information at single-cell "
+                   "resolution.",
+        # 10.1038/s41587-023-01935-0
+    },
+    # ---- spatial transcriptomics -----------------------------------
+    {
+        "group": "spatial transcriptomics",
+        "title": "Cell2location maps fine-grained cell types in spatial transcriptomics",
+        "summary": "Spatial transcriptomic technologies promise to resolve cellular wiring "
+                   "diagrams of tissues, but comprehensive mapping of cell types in situ "
+                   "remains a challenge. cell2location is a Bayesian model that resolves "
+                   "fine-grained cell types in spatial transcriptomic data, accounting for "
+                   "technical variation and borrowing statistical strength across locations "
+                   "to integrate single-cell and spatial transcriptomics with higher "
+                   "sensitivity and resolution.",
+        # 10.1038/s41587-021-01139-4
+    },
+    {
+        "group": "spatial transcriptomics",
+        "title": "Novae: a graph-based foundation model for spatial transcriptomics data",
+        "summary": "Spatial transcriptomics gives high-resolution insight into gene "
+                   "expression within the spatial context of tissues, essential for "
+                   "identifying spatial domains and microenvironment organization. Novae is "
+                   "a graph-based foundation model that extracts representations of cells "
+                   "within their spatial contexts, enabling zero-shot domain inference "
+                   "across gene panels, tissues and technologies, batch-effect correction "
+                   "and a nested hierarchy of spatial domains.",
+        # 10.1038/s41592-025-02899-6
+    },
+    {
+        "group": "spatial transcriptomics",
+        "title": "Slide-tags enables single-nucleus barcoding for multimodal spatial genomics",
+        "summary": "High-throughput single-cell transcriptomic and epigenomic assays lack "
+                   "routine spatial localization of the profiled cells. Slide-tags tags "
+                   "single nuclei within an intact tissue section using spatial barcode "
+                   "oligonucleotides from DNA-barcoded beads of known position, giving "
+                   "sub-10 micron resolution whole-transcriptome data and enabling multiomic "
+                   "measurement of open chromatin, RNA and TCR in the same cells.",
+        # 10.1038/s41586-023-06837-4
+    },
+    # ---- gene regulation and chromatin -----------------------------
+    {
+        "group": "gene regulation and chromatin",
+        "title": "SCENIC+: single-cell multiomic inference of enhancers and gene regulatory networks",
+        "summary": "Joint profiling of chromatin accessibility and gene expression in single "
+                   "cells enables inference of enhancer-driven gene regulatory networks "
+                   "(GRNs). SCENIC+ predicts enhancers along with candidate upstream "
+                   "transcription factors (TFs) and links these enhancers to candidate "
+                   "target genes, using a curated collection of >30,000 motifs. It resolves "
+                   "gene regulation along differentiation trajectories and the effect of TF "
+                   "perturbations on cell state.",
+        # 10.1038/s41592-023-01938-4
+    },
+    {
+        "group": "gene regulation and chromatin",
+        "title": "Mapping enhancer–gene regulatory interactions from single-cell data",
+        "summary": "Predicting enhancer-gene regulatory interactions from single-cell data "
+                   "has been challenging. scE2G is a family of classification models that "
+                   "predict enhancer-gene regulation from single-cell ATAC-seq or multiomic "
+                   "RNA and ATAC-seq features, trained on a CRISPR perturbation dataset of "
+                   ">10,000 element-gene pairs. It is benchmarked against CRISPR "
+                   "perturbations, fine-mapped eQTLs and GWAS variant-gene associations.",
+        # 10.1038/s41588-026-02695-8
     },
 ]
 
