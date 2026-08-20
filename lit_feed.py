@@ -201,23 +201,60 @@ FEEDS = [
 # If INCLUDE_KEYWORDS is non-empty, keep items that match at least one of them in
 # title or summary. Matching is case-insensitive simple substring.
 
+# Matching is plain case-insensitive substring, which is unforgiving about morphology:
+# "multiomics" does NOT match "multiomic data", and "cardiomyopathy" does NOT match
+# "cardiomyopathies". A single character silently drops a paper -- that is how a Genome
+# Research paper on spatial multiomic integration was missed. So each concept lists its
+# spellings, singular/plural forms, and the assay names that never spell the concept out.
+#
+# Every variant below was measured against a real day's pool of 1113 papers. Most add
+# nothing today, because a paper using one term nearly always uses another that already
+# matches; they are here as insurance against the day it does not. Counts in comments
+# are papers each term newly admitted that no other keyword caught.
 INCLUDE_KEYWORDS = [
+    # single-cell, and the single-nucleus assays the cardiac literature actually uses
     "single-cell",
+    "single cell",
     "scRNA-seq",
-    "scrna",
-    "perturbation",
-    "multi-omic",
+    "scrna",              # also catches scRNAseq, scRNA seq
+    "snRNA-seq",
+    "single-nucleus",
+    "single nucleus",
+
+    # perturbation
+    "perturbation",       # substring also covers perturbations, perturbational
+    "perturb-seq",        # assay name; contains no "perturbation"
+
+    # multi-omics
+    "multi-omic",         # substring also covers multi-omics
     "multi omic",
     "multiomics",
-    "spatial transcriptomics",
+    "multiomic",          # +2 papers; "multiomics" cannot match "multiomic data"
+    "multiome",           # 10x Multiome
+    "CITE-seq",
     "phosphoproteomic",
+
+    # spatial
+    "spatial transcriptomics",
+    "spatial transcriptomic",   # singular
+
+    # chromatin
     "chromatin accessibility",
-    "ATAC-seq",
+    "open chromatin",
+    "accessible chromatin",
+    "ATAC-seq",           # substring also covers scATAC-seq, snATAC-seq
+    "ATACseq",            # unhyphenated
+
+    # gene regulation
     "gene regulatory",
-    "foundation model",
+
+    # models
+    "foundation model",   # substring also covers foundation models
     "transformer",
+
+    # cardiovascular
     "cardiomyopathy",
-    "single cell"
+    "cardiomyopathies",   # "cardiomyopathy" does not substring-match this
 ]
 
 # If any of these appear, drop the item.
