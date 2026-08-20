@@ -3,4 +3,17 @@ digests/
 .ipynb_checkpoints/
 rebuild_digest_once.py
 __pycache__
+.DS_Store
+
+# Local-only reading/analysis layer (summaries, reports, trend figures)
+library/
+litfeed/
+
+# Local mail delivery. run_digest_and_email.sh holds SMTP credentials and the
+# recipient list, so neither of these may ever be committed.
+send_digest_email.py
 run_digest_and_email.sh
+.env
+
+# One-off history repair, not part of the tool
+recover_unshown.py
