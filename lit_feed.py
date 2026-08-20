@@ -46,6 +46,24 @@ CROSSREF_ROWS = 500
 CROSSREF_PAUSE_SEC = 1.0
 CROSSREF_RETRIES = 4
 
+# A paper is admitted to the digest if it matches an include keyword OR the ranker
+# puts it at least this close to your seed papers. Keyword matching is brittle --
+# "multiomic data" matches none of "multi-omic"/"multi omic"/"multiomics" -- so this
+# second route is what catches on-topic work that happens not to use your vocabulary.
+# Deliberately set high. Measured on one day of 1205 papers, this route admits
+# roughly 7 extra papers at 0.50, 20 at 0.45 and 41 at 0.40 -- but at 0.40 most of
+# the additions were machine-learning papers with no biology (solid mechanics,
+# cerebellar models, ECG classification), and because every one of them outscored
+# the MEDIAN keyword match they crowded genuine hits out of the TODAY_TOP_K slots.
+#
+# The bar is high because the seed list is short. Five seeds of a title plus one
+# sentence cannot separate "transformer applied to single cells" from "transformer
+# applied to anything", so generic ML scores well. Longer, more numerous seeds are
+# what buys the room to lower this -- see CANONICAL_PAPERS.
+#
+# Set to 0 to disable the semantic route and go back to keywords alone.
+SEMANTIC_ADMIT_SCORE = 0.50
+
 # Abstract length in the emailed copy. Cards end up within a line of each other at
 # this width, which is what keeps the message scannable; the archive copy keeps the
 # longer 1200-character version.
@@ -56,6 +74,9 @@ TOP_K = 60
 
 TODAY_TOP_K = 40
 PREV_TOP_K = 30
+# Scores come from similarity to the CLOSEST seed paper. That runs about 0.04-0.05
+# higher than the older average-of-all-seeds method, so this threshold is slightly
+# more permissive than the same number used to be.
 TODAY_MIN_SCORE = 0.30
 
 # Number of top papers to optionally post to Slack
@@ -393,18 +414,25 @@ def format_authors(authors: List[str], max_shown: int = 3) -> str:
     return f"{clean[0]}, \u2026, {clean[-1]}"
 
 
-def passes_keyword_filters(paper: Paper) -> bool:
+def is_excluded(paper: Paper) -> bool:
+    """Hard veto. Applied at fetch time, before anything is embedded."""
+    if not EXCLUDE_KEYWORDS:
+        return False
     text = f"{paper.title} {paper.summary}".lower()
+    return any(k.lower() in text for k in EXCLUDE_KEYWORDS)
 
-    if INCLUDE_KEYWORDS:
-        if not any(k.lower() in text for k in INCLUDE_KEYWORDS):
-            return False
 
-    if EXCLUDE_KEYWORDS:
-        if any(k.lower() in text for k in EXCLUDE_KEYWORDS):
-            return False
+def matches_include_keywords(paper: Paper) -> bool:
+    """Did the paper use your vocabulary? One of two routes into the digest."""
+    if not INCLUDE_KEYWORDS:
+        return True  # no include list means everything is eligible
+    text = f"{paper.title} {paper.summary}".lower()
+    return any(k.lower() in text for k in INCLUDE_KEYWORDS)
 
-    return True
+
+def passes_keyword_filters(paper: Paper) -> bool:
+    """Both keyword tests at once. Kept for callers that want the old behaviour."""
+    return matches_include_keywords(paper) and not is_excluded(paper)
 
 
 import json
@@ -655,7 +683,9 @@ def fetch_crossref(feed: Dict[str, Any]) -> List[Paper]:
                 source=feed["name"],
                 authors=_crossref_authors(item.get("author")),
             )
-            if passes_keyword_filters(paper):
+            # Only the veto here. The include test moves to admission, after
+            # ranking, so a paper can still get in on semantic similarity alone.
+            if not is_excluded(paper):
                 papers.append(paper)
 
         cursor = message.get("next-cursor")
@@ -703,7 +733,7 @@ def fetch_feed(feed: Dict[str, Any]) -> List[Paper]:
 
     if feed.get("type") == "crossref":
         papers = fetch_crossref(feed)
-        print(f"  -> kept {len(papers)} items after filters")
+        print(f"  -> kept {len(papers)} items (after exclusions; admission comes later)")
         return papers
 
     parsed = _parse_rss(feed["url"])
@@ -735,10 +765,10 @@ def fetch_feed(feed: Dict[str, Any]) -> List[Paper]:
             authors=extract_authors(entry),
         )
 
-        if passes_keyword_filters(paper):
+        if not is_excluded(paper):
             papers.append(paper)
 
-    print(f"  -> kept {len(papers)} items after filters")
+    print(f"  -> kept {len(papers)} items (after exclusions; admission comes later)")
     return papers
 
 
@@ -752,13 +782,19 @@ def rank_papers(papers: List[Paper]) -> List[Paper]:
     # Build canonical embedding
     canon_texts = [c["title"] + ". " + c.get("summary", "") for c in CANONICAL_PAPERS]
     canon_emb = model.encode(canon_texts, convert_to_tensor=True)
-    canon_emb = canon_emb.mean(dim=0, keepdim=True)  # average canonical embedding
 
     # Encode paper texts
     texts = [p.title + ". " + p.summary for p in papers]
-    paper_emb = model.encode(texts, convert_to_tensor=True)
+    paper_emb = model.encode(texts, convert_to_tensor=True, batch_size=64)
 
-    sims = util.cos_sim(paper_emb, canon_emb).cpu().numpy().reshape(-1)
+    # Similarity to the CLOSEST seed, not to their average. Averaging first collapses
+    # the seeds into one point, and a seed unlike the others is then outvoted: with
+    # this list the cardiomyopathy seed sits 0.29-0.54 from its neighbours and only
+    # 0.68 from the centroid, so cardiovascular papers were being scored against a
+    # point dominated by the foundation-model seeds. Taking the max means a paper
+    # close to any one interest scores well, and adding a seed for a new interest
+    # actually widens coverage instead of nudging an average.
+    sims = util.cos_sim(paper_emb, canon_emb).max(dim=1).values.cpu().numpy().reshape(-1)
 
     for p, s in zip(papers, sims):
         p.score = float(s)
@@ -1228,19 +1264,19 @@ def post_to_slack(papers: List[Paper]) -> None:
 # ==========================
 
 def main():
-    all_papers: List[Paper] = []
+    fetched: List[Paper] = []
     for feed in FEEDS:
         try:
-            all_papers.extend(fetch_feed(feed))
+            fetched.extend(fetch_feed(feed))
         except Exception as e:
             print(f"Error fetching {feed['name']}: {e}")
 
     dedup = {}
-    for p in all_papers:
+    for p in fetched:
         dedup.setdefault(paper_key(p), p)
-    all_papers = list(dedup.values())
-    
-    if not all_papers:
+    fetched = list(dedup.values())
+
+    if not fetched:
         print("No papers found after filtering.")
         return
 
@@ -1264,14 +1300,43 @@ def main():
     
     yesterday_date = today_date - timedelta(days=1)
 
-    # Merge today's RSS papers with accumulated previous papers, then dedup by key
+    # Merge today's fetched papers with accumulated previous papers, then dedup by key
     merged = {}
-    for p in (all_papers + prev_papers):
+    for p in (fetched + prev_papers):
         merged[paper_key(p)] = p
     merged_papers = list(merged.values())
-    
-    # Rank the merged set
+
+    # Rank first, so admission can use the score.
     ranked = rank_papers(merged_papers)
+
+    # ---- Admission -----------------------------------------------------------
+    # Two routes in: the paper used your vocabulary, or the ranker put it close
+    # enough to a seed paper. Anything already in the history stays regardless --
+    # it earned its place on an earlier run and dropping it now would make the
+    # Previous Feed flicker as scores shift.
+    admitted, by_keyword, by_score = [], 0, 0
+    for p in ranked:
+        if paper_key(p) in seen_keys:
+            admitted.append(p)
+            continue
+        kw = matches_include_keywords(p)
+        sem = (SEMANTIC_ADMIT_SCORE > 0
+               and not math.isnan(p.score)
+               and p.score >= SEMANTIC_ADMIT_SCORE)
+        if kw or sem:
+            admitted.append(p)
+            by_keyword += bool(kw)
+            by_score += bool(sem and not kw)
+
+    print(f"Admitted {len(admitted)} of {len(ranked)} ranked: "
+          f"{by_keyword} on keywords, {by_score} on similarity "
+          f"(>= {SEMANTIC_ADMIT_SCORE}), rest already in history.")
+
+    # Everything downstream -- the two feeds and the remembered history -- works
+    # from the admitted set only. Papers we fetched but did not admit must NOT be
+    # recorded, or a later seed change could never surface them.
+    all_papers = [p for p in admitted if paper_key(p) not in seen_keys]
+    ranked = admitted
     
     # Split AFTER ranking, but keep accumulated previous even if not in today's RSS
     new_items, prev_items = [], []
