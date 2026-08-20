@@ -117,12 +117,16 @@ FEEDS = [
     },
     
     {
-        # Kept over the science.org table-of-contents feed on purpose. That one does
-        # carry author names, but its summaries are boilerplate ("Science, Volume 393,
-        # Issue 6812") where this one carries real abstract text, and the ranker needs
-        # the abstract far more than the digest needs an author line.
+        # science.org rather than the legacy sciencemag.org host: the content is
+        # identical (same 30 items, same summaries) but sciencemag.org answers 403 to
+        # requests, so the _parse_rss fallback could never rescue it if feedparser's
+        # own fetch failed. This host answers both, so the feed has a safety net.
+        #
+        # Not the science.org table-of-contents feed, though: that one carries author
+        # names but its summaries are boilerplate ("Science, Volume 393, Issue 6812"),
+        # and the ranker needs the abstract more than the digest needs an author line.
         "name": "Science",
-        "url": "http://www.sciencemag.org/rss/current.xml",
+        "url": "https://www.science.org/rss/current.xml",
     },
     
     {
