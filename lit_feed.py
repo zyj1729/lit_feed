@@ -91,10 +91,9 @@ TOP_K = 60
 
 TODAY_TOP_K = 40
 PREV_TOP_K = 30
-# Scores come from similarity to the CLOSEST seed paper. That runs about 0.04-0.05
-# higher than the older average-of-all-seeds method, so this threshold is slightly
-# more permissive than the same number used to be.
-TODAY_MIN_SCORE = 0.30
+# Hard relevance floor for every paper in the digest. Keyword matches do not bypass
+# it; papers above this floor still need a keyword match or SEMANTIC_ADMIT_SCORE.
+TODAY_MIN_SCORE = 0.40
 
 # Number of top papers to optionally post to Slack
 TOP_K_SLACK = 15
@@ -1615,14 +1614,18 @@ def main():
     ranked = rank_papers(merged_papers)
 
     # ---- Admission -----------------------------------------------------------
-    # Two routes in: the paper used your vocabulary, or the ranker put it close
-    # enough to a seed paper. Anything already in the history stays regardless --
-    # it earned its place on an earlier run and dropping it now would make the
-    # Previous Feed flicker as scores shift.
+    # Hard floor first, then two routes in: the paper used your vocabulary, or the
+    # ranker put it close enough to a seed group. The floor applies to history too,
+    # so nothing below it can appear in either section or enter today's history.
     admitted, by_keyword, by_score = [], 0, 0
+    history_kept, below_floor = 0, 0
     for p in ranked:
+        if math.isnan(p.score) or p.score < TODAY_MIN_SCORE:
+            below_floor += 1
+            continue
         if paper_key(p) in seen_keys:
             admitted.append(p)
+            history_kept += 1
             continue
         kw = matches_include_keywords(p)
         sem = (SEMANTIC_ADMIT_SCORE > 0
@@ -1633,9 +1636,12 @@ def main():
             by_keyword += bool(kw)
             by_score += bool(sem and not kw)
 
+    failed_admission = len(ranked) - len(admitted) - below_floor
     print(f"Admitted {len(admitted)} of {len(ranked)} ranked: "
-          f"{by_keyword} on keywords, {by_score} on similarity "
-          f"(>= {SEMANTIC_ADMIT_SCORE}), rest already in history.")
+          f"{history_kept} already in history, {by_keyword} new on keywords, "
+          f"{by_score} new on similarity (>= {SEMANTIC_ADMIT_SCORE}); "
+          f"rejected {below_floor} below the hard floor (< {TODAY_MIN_SCORE}) "
+          f"and {failed_admission} by admission criteria.")
 
     # Everything downstream -- the two feeds and the remembered history -- works
     # from the admitted set only. Papers we fetched but did not admit must NOT be
@@ -1674,19 +1680,14 @@ def main():
         else:
             prev_items.append(p)
 
-    # Apply relevance threshold to Today's feed
-    new_items = [p for p in new_items if (not math.isnan(p.score)) and (p.score >= TODAY_MIN_SCORE)]
-    
     # Cap separately
     new_items = new_items[:TODAY_TOP_K]
     prev_items = prev_items[:PREV_TOP_K]
     
-    # "history_papers" should be everything you want to remember:
-    # previous history + anything you've ever shown today (today + previous candidates)
-    history_dedup = {}
-    for p in (prev_papers + all_papers):
-        history_dedup[paper_key(p)] = p
-    history_papers = list(history_dedup.values())
+    # Keep only currently admitted papers in memory. In particular, a historical
+    # paper that falls below the hard floor must not leak back into a later digest
+    # merely because it appeared before the threshold changed.
+    history_papers = ranked
     
     html = build_html_digest(new_items, prev_items, history_papers)
 

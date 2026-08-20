@@ -57,14 +57,15 @@ Everything you would want to change is a list near the top of `lit_feed.py`, eac
 marked with a comment you can search for.
 
 **`# ---- Canonical papers ----`** is the one that matters most. `CANONICAL_PAPERS`
-holds a few papers that represent what you care about — a title plus a sentence or
-two each. They are averaged into one reference point, and every incoming paper is
-scored by similarity to it. Replace these with papers from your own field and the
-ranking follows.
+holds papers grouped by research interest. Seeds within each group are averaged,
+and every incoming paper is scored against its closest group. Replace these with
+papers from your own field and the ranking follows.
 
-**`# ---- Keyword filters ----`** decides what is even considered.
-`INCLUDE_KEYWORDS` — a paper must match at least one. `EXCLUDE_KEYWORDS` — any
-single match drops it. Case-insensitive substrings against title and abstract.
+**`# ---- Keyword filters ----`** provides one admission route. After exclusions
+and the hard score floor, a new paper is admitted when it matches an
+`INCLUDE_KEYWORDS` term or clears `SEMANTIC_ADMIT_SCORE`. Any `EXCLUDE_KEYWORDS`
+match drops it before ranking. Matching uses case-insensitive substrings against
+title and abstract.
 
 **`# ---- Feeds ----`** is the source list. Add any RSS or Atom feed:
 
@@ -88,10 +89,11 @@ Constants at the top of `lit_feed.py`:
 | `LOOKBACK_DAYS` | `30` | How far back to look, and how long a paper stays in Previous Feed |
 | `TODAY_TOP_K` | `40` | Max papers in Today's Feed |
 | `PREV_TOP_K` | `30` | Max papers in Previous Feed |
-| `TODAY_MIN_SCORE` | `0.30` | Similarity floor — raise it if the digest feels noisy |
+| `TODAY_MIN_SCORE` | `0.40` | Hard score floor for every paper; keyword matches cannot bypass it |
+| `SEMANTIC_ADMIT_SCORE` | `0.55` | Admit an above-floor paper without a keyword match at this score |
 | `EMAIL_ABSTRACT_CHARS` | `300` | Abstract length in the email copy |
 | `TAG_MAX` | `3` | Labels shown per paper |
-| `OUTPUT_DIR` | `"./digests"` | Where digests go |
+| `OUTPUT_DIR` | directory beside `lit_feed.py` | Where digests go |
 | `EMBEDDING_MODEL_NAME` | `all-MiniLM-L6-v2` | Any sentence-transformers model works |
 
 Optional environment variables: `LIT_DIGEST_SLACK_WEBHOOK` to post the top papers to
