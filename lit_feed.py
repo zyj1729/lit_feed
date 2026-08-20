@@ -22,6 +22,7 @@ from typing import List, Dict, Any, Optional
 
 import feedparser
 import requests
+import torch
 import numpy as np
 from sentence_transformers import SentenceTransformer, util
 
@@ -62,7 +63,12 @@ CROSSREF_RETRIES = 4
 # what buys the room to lower this -- see CANONICAL_PAPERS.
 #
 # Set to 0 to disable the semantic route and go back to keywords alone.
-SEMANTIC_ADMIT_SCORE = 0.50
+# 0.47 rather than 0.50: scoring against group centroids instead of individual seeds
+# shifts every score down about 0.018 (averaging moves a centroid away from its own
+# members), so the same selectivity sits slightly lower on the scale. Grouping also
+# sharpens the distribution -- more papers clear 0.50, fewer clear 0.30 -- which is
+# the denoising doing its job.
+SEMANTIC_ADMIT_SCORE = 0.47
 
 # Abstract length in the emailed copy. Cards end up within a line of each other at
 # this width, which is what keeps the message scannable; the archive copy keeps the
@@ -241,31 +247,54 @@ TAGS = [
 ]
 
 # ---- Canonical papers ----
-# These seed the semantic similarity – think of them as "prototypes"
-# for what you care about. Titles + short summaries is enough.
+# These seed the semantic similarity - think of them as "prototypes" for what you
+# care about. Title plus a real abstract works much better than title plus a single
+# sentence; the ranker only knows what these say.
+#
+# "group" sorts a seed into a research interest. Seeds in a group are averaged into
+# one direction, and a paper is scored against the CLOSEST group. Both halves matter:
+#
+#   * averaging inside a group cancels the quirks of any one paper (its dataset
+#     names, its method name) and keeps what the group has in common, so a single
+#     oddly-written seed cannot skew that interest;
+#   * taking the max ACROSS groups means a paper close to any one of your interests
+#     scores well, instead of being penalised for not resembling the average of all
+#     of them.
+#
+# The averaging only starts denoising once a group holds two or three seeds -- with
+# one seed a group is just that paper. A seed with no "group" gets a group to itself.
+#
+# This is the highest-leverage setting in the file. Two or three good seeds per
+# interest is what would let you lower SEMANTIC_ADMIT_SCORE and widen coverage
+# without generic machine-learning papers coming along with it.
 
 CANONICAL_PAPERS = [
     {
+        "group": "cardiovascular single-cell",
         "title": "Single-cell multi-omics and perturbation profiling of human cardiomyocytes",
         "summary": "Integration of scRNA-seq, chromatin accessibility, and proteomics "
                    "to understand cardiomyopathy genetics and perturbation responses."
     },
     {
+        "group": "single-cell foundation models",
         "title": "Foundation models for single-cell gene expression and perturbation prediction",
         "summary": "Large-scale pretraining on single-cell transcriptomes and use of "
                    "in silico perturbations to predict gene regulatory responses."
     },
     {
+        "group": "single-cell foundation models",
         "title": "Transfer learning enables predictions in network biology.",
         "summary": "Context-aware, attention-based model Geneformer pretrained on ~30M "
                    "single-cell transcriptomes to learn gene network dynamics."
     },
     {
+        "group": "single-cell foundation models",
         "title": "scGPT: towards building a foundation model for single-cell multi-omics",
         "summary": "using a generative pretrained transformer trained on over 30M cells."
     },
     {
-        "title": "Tahoe-x1: scaling perturbation-trained single-cell foundation models. ",
+        "group": "single-cell foundation models",
+        "title": "Tahoe-x1: scaling perturbation-trained single-cell foundation models",
         "summary": "Tx1 is pretrained on 200M+ perturbation-rich scRNA profiles and "
                    "fine-tuned for cancer-relevant prediction tasks."
     },
@@ -780,20 +809,31 @@ def rank_papers(papers: List[Paper]) -> List[Paper]:
     model = SentenceTransformer(EMBEDDING_MODEL_NAME)
 
     # Build canonical embedding
-    canon_texts = [c["title"] + ". " + c.get("summary", "") for c in CANONICAL_PAPERS]
-    canon_emb = model.encode(canon_texts, convert_to_tensor=True)
+    # One direction per interest: average the seeds within a group, then score each
+    # paper against whichever group it is closest to.
+    groups: Dict[str, List[str]] = {}
+    for i, c in enumerate(CANONICAL_PAPERS):
+        key = c.get("group") or f"seed {i + 1}"
+        groups.setdefault(key, []).append(c["title"] + ". " + c.get("summary", ""))
+
+    flat = [t for texts in groups.values() for t in texts]
+    seed_emb = model.encode(flat, convert_to_tensor=True)
+    centroids, offset = [], 0
+    for texts in groups.values():
+        centroids.append(seed_emb[offset:offset + len(texts)].mean(dim=0))
+        offset += len(texts)
+    canon_emb = torch.stack(centroids)
+    print("Seed groups: " + ", ".join(f"{k} ({len(v)})" for k, v in groups.items()))
 
     # Encode paper texts
     texts = [p.title + ". " + p.summary for p in papers]
     paper_emb = model.encode(texts, convert_to_tensor=True, batch_size=64)
 
-    # Similarity to the CLOSEST seed, not to their average. Averaging first collapses
-    # the seeds into one point, and a seed unlike the others is then outvoted: with
-    # this list the cardiomyopathy seed sits 0.29-0.54 from its neighbours and only
-    # 0.68 from the centroid, so cardiovascular papers were being scored against a
-    # point dominated by the foundation-model seeds. Taking the max means a paper
-    # close to any one interest scores well, and adding a seed for a new interest
-    # actually widens coverage instead of nudging an average.
+    # Similarity to the CLOSEST group, not to the average of everything. One global
+    # average outvotes any interest unlike the others: with this list the
+    # cardiovascular seed sits 0.29-0.54 from its neighbours and 0.68 from the global
+    # centroid, so cardiovascular papers were scored against a point dominated by the
+    # foundation-model seeds.
     sims = util.cos_sim(paper_emb, canon_emb).max(dim=1).values.cpu().numpy().reshape(-1)
 
     for p, s in zip(papers, sims):
